@@ -57,7 +57,7 @@ jobs:
           echo "Downloaded ROM: rom/$filename"
           echo "filename=$filename" >> $GITHUB_OUTPUT
 
-      - name: Download Custom Root Zip
+      - name: Download Custom Root
         id: download_root
         if: ${{ github.event.inputs.custom_root_zip_url != '' }}
         run: |
@@ -65,9 +65,10 @@ jobs:
           mkdir -p custom-root
           cd custom-root
           curl -L -O -J "$URL"
-          filename=$(ls -1 *.zip | head -n1)
+          filename=$(ls -1 *.zip *.img | head -n1)
           if [ -z "$filename" ]; then
-            echo "No custom root zip downloaded!"
+            echo "No custom root .zip or .img downloaded!"
+            ls -la
             exit 1
           fi
           echo "Downloaded Root: custom-root/$filename"

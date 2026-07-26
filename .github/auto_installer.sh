@@ -127,8 +127,8 @@ download_with_fallback() {
 }
 
 process_custom_root() {
-    local CUSTOM_ZIP="$1"
-    log "[INFO] Processing Custom Root Zip: $CUSTOM_ZIP"
+    local CUSTOM_ROOT="$1"
+    log "[INFO] Processing Custom Root: $CUSTOM_ROOT"
     local C_ROOT_WORK="$TARGET_DIR/custom_root_work"
     local MAGISK_BIN="$MAGISK_DIR/assets/magiskboot"
     local BOOT_IMG="$TARGET_DIR/images/boot.img"
@@ -138,36 +138,68 @@ process_custom_root() {
         return 1
     fi
 
+    $BIN_DIR/busybox rm -rf "$C_ROOT_WORK"
     $BIN_DIR/busybox mkdir -p "$C_ROOT_WORK"
-    log "[INFO] Extracting 'Image' (Kernel) from custom zip..."
-    $BIN_DIR/busybox unzip -q "$CUSTOM_ZIP" -d "$C_ROOT_WORK/extracted_zip"
-    local KERNEL_FILE=$(find "$C_ROOT_WORK/extracted_zip" -type f -name "Image" | head -n 1)
+    local PREV_DIR="$PWD"
+    local KERNEL_FILE=""
 
-    if [ -z "$KERNEL_FILE" ]; then
-        log "[ERROR] No file named 'Image' found inside the provided zip!"
-        $BIN_DIR/busybox rm -rf "$C_ROOT_WORK"
+    if [[ "$CUSTOM_ROOT" == *.img ]]; then
+        log "[INFO] unpacking provided .img to extrcat the custom kernel..."
+        $BIN_DIR/busybox mkdir -p "$C_ROOT_WORK/extracted_img"
+        $BIN_DIR/busybox cp "$CUSTOM_ROOT" "$C_ROOT_WORK/extracted_img/custom.img"
+        cd "$C_ROOT_WORK/extracted_img" || return
+
+        if "$MAGISK_BIN" unpack custom.img > /dev/null 2>&1; then
+            if [ -f "kernel" ]; then
+                KERNEL_FILE="$PWD/kernel"
+                log "[INFO] extracted 'kernel' from custom .img"
+            else
+                log "[ERROR] no 'kernel' file found inside!"
+                cd "$PREV_DIR"
+                $BIN_DIR/busybox rm -rf "$C_ROOT_WORK"
+                return 1
+            fi
+        else
+            log "[ERROR] Your provided .img file is not a valid Android boot image!"
+            cd "$PREV_DIR"
+            $BIN_DIR/busybox rm -rf "$C_ROOT_WORK"
+            return 1
+        fi
+        cd "$PREV_DIR"
+
+    elif [[ "$CUSTOM_ROOT" == *.zip ]]; then
+        log "[INFO] Extrcating custom zip to find kernel..."
+        $BIN_DIR/busybox mkdir -p "$C_ROOT_WORK/extracted_zip"
+        $BIN_DIR/busybox unzip -q "$CUSTOM_ROOT" -d "$C_ROOT_WORK/extracted_zip"
+        KERNEL_FILE=$(find "$C_ROOT_WORK/extracted_zip" -type f \( -name "Image" -o -name "kernel" \) | head -n 1)
+
+        if [ -z "$KERNEL_FILE" ]; then
+            log "[ERROR] No file named 'Image' or 'kernel' found inside the provided zip!"
+            $BIN_DIR/busybox rm -rf "$C_ROOT_WORK"
+            return 1
+        fi
+
+        log "[INFO] Found kernel image at: $KERNEL_FILE"
+
+    else
+        log "[ERROR] unsupported file format, please provide a valid .img or .zip file"
         return 1
     fi
-
-    log "[INFO] Found kernel image at: $KERNEL_FILE"
-    $BIN_DIR/busybox cp "$KERNEL_FILE" "$C_ROOT_WORK/kernel"
-    log "[INFO] Copying boot.img for patching..."
-    $BIN_DIR/busybox cp "$BOOT_IMG" "$C_ROOT_WORK/boot.img"
-    local PREV_DIR="$PWD"
+    
     cd "$C_ROOT_WORK" || return
-
+    $BIN_DIR/busybox cp "$BOOT_IMG" "boot.img"
     log "[INFO] Unpacking boot.img..."
     "$MAGISK_BIN" unpack boot.img > /dev/null 2>&1
     
     if [ ! -f "kernel" ]; then
          log "[ERROR] Failed to unpack boot.img (kernel file missing)."
          cd "$PREV_DIR"
+         $BIN_DIR/busybox rm -rf "$C_ROOT_WORK"
          return 1
     fi
 
     log "[INFO] Replacing stock kernel with custom kernel..."
-    $BIN_DIR/busybox cp "$KERNEL_FILE" "kernel_custom"
-    $BIN_DIR/busybox mv -f "kernel_custom" "kernel"
+    $BIN_DIR/busybox cp "$KERNEL_FILE" "kernel"
     log "[INFO] Repacking boot.img..."
     "$MAGISK_BIN" repack boot.img > /dev/null 2>&1
 
@@ -180,6 +212,7 @@ process_custom_root() {
 
     cd "$PREV_DIR"
     $BIN_DIR/busybox rm -rf "$C_ROOT_WORK"
+    return 0
 }
 
 # Function to patch boot.img with magisk
